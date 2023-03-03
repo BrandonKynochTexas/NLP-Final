@@ -1,0 +1,5 @@
+numpy
+tradingview_ta
+pytz
+tzlocal
+git+https://github.com/StreamAlpha/tvdatafeed.git

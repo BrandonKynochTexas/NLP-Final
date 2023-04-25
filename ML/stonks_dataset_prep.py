@@ -28,6 +28,11 @@ from bs4 import BeautifulSoup # For extracting contents of html pages
 from datetime import datetime
 from readability import Document
 
+from selenium import webdriver
+from selenium.webdriver.support.wait import WebDriverWait 
+from selenium.webdriver.common.by import By
+import selenium.webdriver.support.expected_conditions as EC
+
 import pickle
 import os.path
 
@@ -95,7 +100,7 @@ class StockData:
 
 
 
-        # Fetch sentiment data (Timeseries sentiment data from FinViz articles)
+        # Fetch FinViz sentiment data (Timeseries sentiment data from FinViz articles)
         self.article_collector_path = f'./Dataset/{ticker}-article-collector'
         if os.path.exists(self.article_collector_path):
             # Try load from pickle
@@ -103,11 +108,27 @@ class StockData:
             self.article_collector = pickle.load(article_collector_file)
         else:
             # Fetch articles using webscraper
-            self.article_collector = ArticleCollector(ticker)
-            self.article_collector.fetch_articles()
+            self.article_collector = ArticleCollector(ticker, exchange)
+            self.article_collector.fetch_FinViz_articles()
             # save using pickle
             article_collector_file = open(self.article_collector_path, 'wb')
             pickle.dump(self.article_collector, article_collector_file)
+
+
+
+        # Fetch Motley sentiment data (Motley Fool articles)
+        self.motley_article_collector_path = f'./Dataset/{ticker}-motley-article-collector'
+        if os.path.exists(self.motley_article_collector_path):
+            # Try load from pickle
+            motley_article_collector_file = open(self.motley_article_collector_path, 'rb')
+            self.motley_article_collector = pickle.load(motley_article_collector_file)
+        else:
+            # Fetch articles using webscraper
+            self.motley_article_collector = ArticleCollector(ticker, exchange)
+            self.motley_article_collector.fetch_Motley_articles()
+            # save using pickle
+            motley_article_collector_file = open(self.motley_article_collector_path, 'wb')
+            pickle.dump(self.motley_article_collector, motley_article_collector_file)
 
 
 
@@ -217,22 +238,27 @@ class TVConnection:
 
 
 
+FINVIZ_DATE_TYPE = 'FINVIZ_DATE'
+MOTLEY_DATE_TYPE = 'MOTLEY_DATE'
 
-
-class FinViz_Article:
-    def __init__(self, url, date_string) -> None:
+class Sentiment_Article: # Eg. FinViz or Motley article
+    def __init__(self, url, date_string, date_type) -> None:
         self.url = url
         self.title = ""
         self.body = ""
         
-        try:
-            self.date = datetime_from_str(date_string)
+        if date_type == FINVIZ_DATE_TYPE:
+            try:
+                self.date = datetime_from_str(date_string)
+                self.has_date = True
+            except:
+                self.date = time_from_str(date_string)
+                self.has_date = False
+        else:
+            self.date = date_from_str_simple(date_string)
             self.has_date = True
-        except:
-            self.date = time_from_str(date_string)
-            self.has_date = False
 
-    def set_date(self, new_date):
+    def set_date(self, new_date): # Set the date while keeping time the same
         self.date = self.date.replace(year=new_date.year, month=new_date.month, day=new_date.day)
         self.has_date = True
     
@@ -242,25 +268,46 @@ class FinViz_Article:
     def __repr__(self):
         return f'{self.date}\t{self.title}\n\t{self.url}\n'
 
+
+
+
+
 class ArticleCollector:
-    def __init__(self, ticker) -> None:
+    def __init__(self, ticker, exchange) -> None:
         self.SCRAPEOPS_API_KEY = '58118b46-64d0-4212-bd38-5b00feeba57e' # Brandon's API key
         self.USE_SCAPEOPS = False # Please don't set to true before setting up your own api key
 
         self.ticker = ticker
-        self.articles = [] # array of FinViz_Article
+        self.exchange = exchange
+        self.articles = [] # array of Sentiment_Article
 
-    def fetch_articles(self):
-        print(f'FETCHING ARTICLES FOR TICKER: {self.ticker}')
-        self.articles = self.fetch_related_links(ticker=self.ticker)
+
+
+    def fetch_FinViz_articles(self):
+        print(f'FETCHING FINVIZ ARTICLES FOR TICKER: {self.ticker}')
+        self.articles = self.fetch_related_links_FinViz(ticker=self.ticker)
 
         for article in self.articles:
         # for article in self.articles[:10]:
             print(f'Fetching article for {self.ticker}: {article.url}')
             self.read_yahoo_finance_article(article)
-            print(f'\t\tArticle fetched:\t {repr(article)}')
+            print(f'\t\tFinViz article fetched:\t {repr(article)}')
         
-        print(f'FINISHED FETCHING ARTICLES FOR TICKER: {self.ticker}')
+        print(f'FINISHED FETCHING FINVIZ ARTICLES FOR TICKER: {self.ticker}')
+    
+    def fetch_Motley_articles(self):
+        print(f'FETCHING MOTLEY ARTICLES FOR TICKER: {self.ticker}')
+        self.articles = self.fetch_related_links_Motley(ticker=self.ticker, exchange=self.exchange)
+
+        for article in self.articles:
+        # for article in self.articles[:10]:
+            print(f'Fetching article for {self.ticker}: {article.url}')
+            self.read_article(article)
+            print(f'\t\tMotley article fetched:\t {repr(article)}')
+        
+        print(f'FINISHED FETCHING MOTLEY ARTICLES FOR TICKER: {self.ticker}')
+
+
 
     def fetch_html_source(self, url):
         # User agent generator - https://www.useragentstring.com/pages/useragentstring.php
@@ -285,7 +332,7 @@ class ArticleCollector:
         
         return html
 
-    def fetch_related_links(self, ticker):
+    def fetch_related_links_FinViz(self, ticker):
         articles = []
         url = f"https://finviz.com/quote.ashx?t={ticker}&p=d"
         html = self.fetch_html_source(url)
@@ -297,13 +344,73 @@ class ArticleCollector:
         for div in l:
             date_string = div.parent.parent.findChildren('td', recursive=False)[0].text
             for i in div.findAll("a"):
-                articles.append(FinViz_Article(url=i['href'], date_string=date_string))
+                articles.append(Sentiment_Article(url=i['href'], date_string=date_string, date_type=FINVIZ_DATE_TYPE))
 
         for i in range(1, len(articles), 1):
             if articles[i].has_date == False:
                 articles[i].set_date(articles[i-1].date)
 
         return articles
+
+    def fetch_related_links_Motley(self, ticker, exchange):
+        articles = []
+
+        # Create webdriver object
+        driver = webdriver.Chrome()
+        driver.get(f"https://www.fool.com/quote/{exchange.lower()}/{ticker.lower()}/")
+
+        load_more_clicks_count = 20 # Change this to load more articles
+        for i in range(load_more_clicks_count):
+            load_more_button = driver.find_element(By.XPATH, '//*[@id="quote-news-analysis"]/div[3]/div[1]/button')
+            # Scroll to load more button
+            driver.execute_script("arguments[0].scrollIntoView();", load_more_button)
+            # Wait until button is visible
+            WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="quote-news-analysis"]/div[3]/div[1]/button')))
+            # Wait until button is clickable, then click
+            driver.execute_script(
+                "arguments[0].click();",
+                WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="quote-news-analysis"]/div[3]/div[1]/button')))
+            )
+            print(f'Loading Motley Fool articles: ({i}/{load_more_clicks_count})')
+            # Wait until loading indicator is hidden
+            WebDriverWait(driver, 20).until(EC.invisibility_of_element_located((By.XPATH, '//*[@id="quote-news-analysis"]/div[3]/div[1]/button/svg')))
+            # Sometimes the WebDriverWait events still exit early so we wait a little bit extra (This isn't ideal solution)
+            driver.implicitly_wait(1)
+
+        html = driver.page_source
+        driver.close()
+
+        soup = BeautifulSoup(html, 'html.parser')
+        l = soup.findAll("div", {"id":"news-analysis-container"})
+
+        links = []
+        for div in l:
+            for i in div.findAll("a"):
+                href = i['href']
+                if href.startswith('http'): # Motley fool related article links don't start with HTTPs, although some links like ads/sign up links exist in this div
+                    continue
+                if href.startswith('/terms'): # Discard unrelated articles - Eg https://fool.com/terms/d/digital wallet
+                    continue
+                # We are only interested in links containing the date prefix
+                # Relevant links should start with investing/{date}/
+                if href.startswith('/investing/20'):
+                    links.append(f'https://fool.com{href}')
+
+        links_count_with_duplicates = len(links)
+        links = list(set(links)) # Convert to set and back to list to remove duplicate links
+        if links_count_with_duplicates - len(links) > 0:
+            print(f'WARNING (Motley links):\t {links_count_with_duplicates - len(links)} duplicate links found and removed')
+
+        for link in links:
+            link_split = link.split('/')
+            date_string = f'{link_split[6]}/{link_split[5]}/{link_split[4]}' # DD/MM/YYYY   Eg. 21/04/2023
+            articles.append(Sentiment_Article(url=link, date_string=date_string, date_type=MOTLEY_DATE_TYPE))
+        
+        return articles
+
+
+
+
 
     def print_links(links, limit=-1):
         print(f'Total links fetched: {len(links)}\n')
@@ -313,6 +420,18 @@ class ArticleCollector:
         else:
             for i in range(limit):
                 print(links[i])
+
+    
+
+    def read_article(self, article):
+        html = self.fetch_html_source(article.url)
+        doc = Document(html)
+
+        try: # Dereferencing doc might fail if document is empty for some reason
+            article.title = doc.title()
+            article.body = doc.summary(html_partial=True)
+        except:
+            pass
 
     def read_yahoo_finance_article(self, article):
         html = self.fetch_html_source(article.url)
@@ -343,6 +462,9 @@ def datetime_from_str(date):
     return datetime.strptime(date, '%b-%d-%y %I:%M%p')
 def time_from_str(date):
     return datetime.strptime(date, '%I:%M%p')
+
+def date_from_str_simple(date):
+    return datetime.strptime(date, '%d/%m/%Y')  # Eg. 21/04/2023
 
 
 

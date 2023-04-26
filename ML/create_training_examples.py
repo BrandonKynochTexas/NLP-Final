@@ -69,7 +69,7 @@ def create_training_data(articles, real_price_data):
         for article in articles:
             if current_date == article.date.date():
                 
-                print(f"Working on article: {article.title}")
+                print(f"Working on article: {article.title} {article.date}")
 
                 article_score = calc_article_score(article.body, model_pipeline)
                 article_scores.append(article_score)
@@ -103,35 +103,44 @@ def create_training_data(articles, real_price_data):
     return training_examples
 
 
-
 if __name__== "__main__":
+
+    TICKER = "AMD" # PUT TICKER HERE
+
     # TODO: Change this to be dynamic and configurable
-    with open('../Dataset/AMD-article-collector', 'rb') as f:
+    with open(f'./Dataset/{TICKER}-article-collector', 'rb') as f:
         finviz = pickle.load(f).articles
         
-    with open('../Dataset/AMD-motley-article-collector', 'rb') as f:
+    with open(f'./Dataset/{TICKER}-motley-article-collector', 'rb') as f:
         motley = pickle.load(f).articles
-    earliest_article_date = min(finviz[-1].date, motley[-1].date)
-
 
     combined_articles = finviz.copy()
     combined_articles.extend(motley)
+
+    earliest_article_date = combined_articles[0].date.date()
+
+    for article in combined_articles:
+        if article.date.date() < earliest_article_date:
+            earliest_article_date = article.date.date()
+
     earliest_price_idx = float('inf')
 
-
-    with open('../Dataset/AMD-price-data-Interval.in_daily', 'rb') as f:
+    with open(f'./Dataset/{TICKER}-price-data-Interval.in_daily', 'rb') as f:
         price_data = pickle.load(f)
 
     # Find the index of the price data of the earliest article
     for idx, date in enumerate(price_data):
         current_date = epoch_to_dateime(date[0][0]).date()
 
-        if current_date == earliest_article_date.date():
+        if  earliest_article_date >= current_date :
             earliest_price_idx = idx
+
+    print("Earliest article date:", earliest_article_date)
+    print("Total Articles: ", len(combined_articles))
 
     real_price_data = price_data[earliest_price_idx:]
     training_examples = create_training_data(combined_articles, real_price_data)
 
-    pickle.dump(training_examples, open('test.pkl', 'wb'))
+    pickle.dump(training_examples, open(f'./training_examples/{TICKER}_training_example.pkl', 'wb'))
 
 

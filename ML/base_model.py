@@ -40,8 +40,8 @@ def train_stock_model():
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
 
     d_model = 4
-    nhead = 4
-    n_layers = 4
+    nhead = 2
+    n_layers = 2
     lr = 1e-4
 
     model = TransformerLanguageModel(d_model=d_model, nhead=nhead, n_layers=n_layers)
@@ -52,13 +52,13 @@ def train_stock_model():
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fcn = nn.NLLLoss()
 
-    epoch = 300
+    epoch = 2000
 
     start_time = time.time()
-    print(f"e:{epoch} lr:{lr} d_model:{d_model} nhead:{nhead} n_layers:{n_layers}")
+    print(f"\ne:{epoch} lr:{lr} d_model:{d_model} nhead:{nhead} n_layers:{n_layers}")
 
 
-    with open('amd_training_exampels.pkl', 'rb') as f:
+    with open('training_examples/AMD_training_example.pkl', 'rb') as f:
         training_examples = pickle.load(f)
 
     training_examples_values = []
@@ -67,12 +67,12 @@ def train_stock_model():
         values.extend(example.sentiment_scores)
         training_examples_values.append(values)
         
+    TRAINING_DAY_LENGTH = 10
     
-    validation_length = 5
+    validation_length = 10
     validation = torch.tensor(training_examples_values[-validation_length:])
     training_examples_tensor = torch.tensor(training_examples_values[:-validation_length])
     
-    TRAINING_DAY_LENGTH = 5
     
     for e in range(epoch):
         total_loss = 0
@@ -93,14 +93,10 @@ def train_stock_model():
             
             log_probs = model.forward(example_tensor)
 
-            if i % (TRAINING_DAY_LENGTH * 2) == 0:
-                elapsed_time = time.time() - start_time
-
-                print(f"e:{e} i:{i} loss:{total_loss:.3f} time:{elapsed_time:.2f}")
-                print("gold", gold_example_tensor)
-                print("pred", torch.argmax(log_probs, dim=1))
+            if i % (TRAINING_DAY_LENGTH * 4)  == 0:
+                print("gold", gold_example_tensor.tolist())
+                print("pred", torch.argmax(log_probs, dim=1).tolist())
                 print()
-                total_loss = 0
 
             loss = loss_fcn(log_probs, gold_example_tensor)
 
@@ -109,8 +105,9 @@ def train_stock_model():
             optimizer.step()
 
             total_loss += loss
+        print(f'epoch:{e} total_loss:{total_loss} time:{time.time() - start_time:.2f}\n')
 
-    print(f"e:{epoch} lr:{lr} nhead:{nhead} n_layers:{n_layers} total_time:{time.time() - start_time:.2f}")
+    print(f"\ne:{epoch} lr:{lr} nhead:{nhead} n_layers:{n_layers} total_time:{time.time() - start_time:.2f}")
 
 
     # Evaluate the Model
@@ -130,19 +127,18 @@ def train_stock_model():
                 gold_examples.append(0)
 
         log_probs = model.forward(example_tensor)
-
         predicted_label = torch.argmax(log_probs, dim=1)
 
         for label, gold_label in zip(predicted_label, gold_examples):
             total += 1
             if label == gold_label:
                 correct += 1
+        if i == 0:
+            print("gold", gold_examples)
+            print("pred", predicted_label.tolist())
+            print()
 
-        print("gold", gold_examples)
-        print("pred", predicted_label.tolist())
-        print()
-
-    print(f"Accuracy: {correct}/{total} = {correct / total}\n")
+    print(f"Training Accuracy: {correct}/{total} = {correct / total}\n")
 
 
     print("Evaluating model on validation data\n")
@@ -160,7 +156,6 @@ def train_stock_model():
                 gold_examples.append(0)
 
         log_probs = model.forward(example_tensor)
-
         predicted_label = torch.argmax(log_probs, dim=1)
 
         for label, gold_label in zip(predicted_label, gold_examples):
@@ -172,7 +167,7 @@ def train_stock_model():
         print("pred", predicted_label.tolist())
         print()
 
-    print(f"Accuracy: {correct}/{total} = {correct / total} ")
+    print(f"Validation Accuracy: {correct}/{total} = {correct / total} ")
 
 
 if __name__== "__main__":

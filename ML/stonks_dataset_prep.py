@@ -359,7 +359,7 @@ class ArticleCollector:
         driver = webdriver.Chrome()
         driver.get(f"https://www.fool.com/quote/{exchange.lower()}/{ticker.lower()}/")
 
-        load_more_clicks_count = 20 # Change this to load more articles
+        load_more_clicks_count = 100 # Change this to load more articles
         for i in range(load_more_clicks_count):
             load_more_button = driver.find_element(By.XPATH, '//*[@id="quote-news-analysis"]/div[3]/div[1]/button')
             # Scroll to load more button
@@ -470,8 +470,8 @@ def date_from_str_simple(date):
 
 
 if __name__=="__main__":
-    nvda_data = StockData(ticker='NVDA', interval=tvDFI.in_1_hour, num_days=12)
-    # amd_data = StockData(ticker='AMD', interval=tvDFI.in_1_hour, num_days=12)
+    # nvda_data = StockData(ticker='NVDA', interval=tvDFI.in_1_hour, num_days=365)
+    amd_data = StockData(ticker='AMD', interval=tvDFI.in_1_hour, num_days=365)
     # qcom_data = StockData(ticker='QCOM', interval=tvDFI.in_1_hour, num_days=12)
     # txn_data = StockData(ticker='TXN', interval=tvDFI.in_1_hour, num_days=12)
     # avgo_data = StockData(ticker='AVGO', interval=tvDFI.in_1_hour, num_days=12)

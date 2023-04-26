@@ -12,6 +12,7 @@ __pycache__/
 .Python
 build/
 ML/Dataset/
+ML/training_examples/
 develop-eggs/
 dist/
 downloads/

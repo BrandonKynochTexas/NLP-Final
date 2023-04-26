@@ -1,5 +1,10 @@
+pytorch
 numpy
 tradingview_ta
 pytz
 tzlocal
+transformers
+selenium
+bs4
+readability
 git+https://github.com/StreamAlpha/tvdatafeed.git

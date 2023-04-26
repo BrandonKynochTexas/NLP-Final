@@ -22,8 +22,8 @@ class TrainingExample:
     sentiment_scores: List[float] = field(default_factory=default_sentiment_scores)
 
 
-def epoch_to_dateime(epoch):
-    return datetime.fromtimestamp(int(epoch))
+def timestamp_to_dateime(timestamp):
+    return datetime.fromtimestamp(int(timestamp))
 
 # Prepare text for the model
 def clean_text(text):
@@ -51,8 +51,8 @@ def create_training_data(articles, real_price_data):
     training_examples = []
 
     for idx, price_data in enumerate(real_price_data):
-        price = price_data[0][1]
-        current_date = epoch_to_dateime(price_data[0][0]).date()
+        price = price_data[0][1] # price_data[i][1] is close price
+        current_date = timestamp_to_dateime(price_data[0][0]).date()
 
         if idx == 0:
             example = TrainingExample(current_date, 0)
@@ -130,13 +130,15 @@ if __name__== "__main__":
 
     # Find the index of the price data of the earliest article
     for idx, date in enumerate(price_data):
-        current_date = epoch_to_dateime(date[0][0]).date()
-
+        current_date = timestamp_to_dateime(date[0][0]).date()
         if  earliest_article_date >= current_date :
             earliest_price_idx = idx
-
+    
     print("Earliest article date:", earliest_article_date)
     print("Total Articles: ", len(combined_articles))
+
+    if earliest_price_idx == float('inf'):
+        raise Exception('Earliest article date preceeds earliest price data')
 
     real_price_data = price_data[earliest_price_idx:]
     training_examples = create_training_data(combined_articles, real_price_data)

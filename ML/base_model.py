@@ -19,7 +19,7 @@ class StockDataset(Dataset):
     def __init__(self, training_examples, days_attention, days_stride) -> None:
         self.days_attention = days_attention # Length of each sample - i.e. maximum number of days model can attend to
         self.days_stride = days_stride
-        self.n_samples = math.floor((len(training_examples) - days_attention) / days_stride)
+        self.n_samples = math.floor((len(training_examples) - days_attention) / days_stride) + 1
 
         # Input feature size if [n_days, 4]
         #   input_feature[i] = [close_price, sentiment_positive, sentiment_neutral, sentiment_negative]
@@ -118,7 +118,7 @@ def train_stock_model():
     d_model = 4
     nhead = 2
     n_layers = 2
-    lr = 1e-4
+    lr = 1e-3
 
     model = TransformerLanguageModel(device=device, d_model=d_model, nhead=nhead, n_layers=n_layers)
     model.zero_grad()
@@ -129,23 +129,34 @@ def train_stock_model():
     loss_fcn = nn.NLLLoss()
 
 
-    # print(f"\nTotal epochs:{epochs} lr:{lr} d_model:{d_model} nhead:{nhead} n_layers:{n_layers}")
-
     print(f'Loading data')
 
     with open('training_examples/AMD_training_example.pkl', 'rb') as f:
         training_examples = pickle.load(f) # A list of TrainingExample
 
+    
+    train_length = math.floor(len(training_examples) * 0.9)
+    amd_stocks_train_examples = training_examples[:train_length]
+    amd_stocks_test_examples = training_examples[train_length:]
+    print(f'Using training test split: {len(amd_stocks_train_examples)} : {len(amd_stocks_test_examples)}')
+
+
     TRAINING_DAY_LENGTH = 10
-    stock_dataset = StockDataset(
-        training_examples,
+    amd_stock_train_dataset = StockDataset(
+        amd_stocks_train_examples,
         days_attention=TRAINING_DAY_LENGTH,
-        days_stride=3 # Determines how much day windows will overlap
+        days_stride=2 # Determines how much day windows will overlap
         # if days_stride == days_attention -> there is no overlap
     )
 
-    train_length = math.floor(len(stock_dataset) * 0.9)
-    stocks_train, stocks_test = random_split(stock_dataset, [train_length, len(stock_dataset) - train_length])
+    amd_stock_test_dataset = StockDataset(
+        amd_stocks_test_examples,
+        days_attention=TRAINING_DAY_LENGTH,
+        days_stride=1
+    )
+
+    stocks_train = amd_stock_train_dataset
+
 
     train_data_loader = DataLoader(
         dataset=stocks_train,
@@ -156,7 +167,7 @@ def train_stock_model():
 
     print(f'Beginning training')
 
-    num_epochs = 400
+    num_epochs = 200
     n_total_steps = len(train_data_loader)
     log_interval = 1
     for epoch in range(num_epochs):
@@ -206,7 +217,7 @@ def train_stock_model():
     print("\nEvaluating model on test data\n")
     evaluate_model(
         model=model,
-        dataset=stocks_test,
+        dataset=amd_stock_test_dataset,
         device=device
     )
     

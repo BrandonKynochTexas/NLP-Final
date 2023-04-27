@@ -359,7 +359,7 @@ class ArticleCollector:
         driver = webdriver.Chrome()
         driver.get(f"https://www.fool.com/quote/{exchange.lower()}/{ticker.lower()}/")
 
-        load_more_clicks_count = 100 # Change this to load more articles
+        load_more_clicks_count = 500 # Change this to load more articles
         for i in range(load_more_clicks_count):
             load_more_button = driver.find_element(By.XPATH, '//*[@id="quote-news-analysis"]/div[3]/div[1]/button')
             # Scroll to load more button
@@ -470,9 +470,14 @@ def date_from_str_simple(date):
 
 
 if __name__=="__main__":
-    # nvda_data = StockData(ticker='NVDA', interval=tvDFI.in_1_hour, num_days=365)
-    amd_data = StockData(ticker='AMD', interval=tvDFI.in_1_hour, num_days=365)
+    nvda_data = StockData(ticker='NVDA', interval=tvDFI.in_daily, num_days=2600)
+    # amd_data = StockData(ticker='AMD', interval=tvDFI.in_1_hour, num_days=365)
     # qcom_data = StockData(ticker='QCOM', interval=tvDFI.in_1_hour, num_days=12)
     # txn_data = StockData(ticker='TXN', interval=tvDFI.in_1_hour, num_days=12)
     # avgo_data = StockData(ticker='AVGO', interval=tvDFI.in_1_hour, num_days=12)
     # tsm_data = StockData(ticker='TSM', exchange='NYSE', interval=tvDFI.in_1_hour, num_days=12)
+    # motley_article_collector_file = open('NVDA-motley-article-collector.pkl', 'wb')
+
+    # motley_article_collector = ArticleCollector(ticker='NVDA', exchange='nasdaq')
+    # motley_article_collector.fetch_Motley_articles()
+    # pickle.dump(motley_article_collector, motley_article_collector_file)

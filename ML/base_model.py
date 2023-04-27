@@ -2,6 +2,7 @@ from create_training_examples import TrainingExample
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim.lr_scheduler as lr_scheduler
 import pickle
 import time
 
@@ -38,11 +39,13 @@ class TransformerLanguageModel(nn.Module):
 def train_stock_model():
 
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+    print(torch.cuda.is_available())
 
+    TRAINING_DAY_LENGTH = 10
     d_model = 4
-    nhead = 2
-    n_layers = 2
-    lr = 1e-4
+    nhead = 1
+    n_layers = 6
+    lr = 1e-5
 
     model = TransformerLanguageModel(d_model=d_model, nhead=nhead, n_layers=n_layers)
     model.zero_grad()
@@ -50,15 +53,17 @@ def train_stock_model():
     model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # scheduler = lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.999)
+
+    # class_weights = torch.tensor([1.2, 1.0])  # Class weights for three classes
     loss_fcn = nn.NLLLoss()
 
-    epoch = 2000
+    epoch = 100
 
     start_time = time.time()
     print(f"\ne:{epoch} lr:{lr} d_model:{d_model} nhead:{nhead} n_layers:{n_layers}")
 
-
-    with open('training_examples/AMD_training_example.pkl', 'rb') as f:
+    with open('training_examples/NVDA_training_example.pkl', 'rb') as f:
         training_examples = pickle.load(f)
 
     training_examples_values = []
@@ -66,19 +71,30 @@ def train_stock_model():
         values = [example.price]
         values.extend(example.sentiment_scores)
         training_examples_values.append(values)
-        
-    TRAINING_DAY_LENGTH = 10
+
+    # training_examples_values = training_examples_values[:500]
+
+    print(len(training_examples))
     
-    validation_length = 10
+    validation_length = 100
     validation = torch.tensor(training_examples_values[-validation_length:])
     training_examples_tensor = torch.tensor(training_examples_values[:-validation_length])
     
+    skipped_training = []
     
     for e in range(epoch):
         total_loss = 0
+        total_down = 0
+        skipped_populated = False
         # Need to subtract by 1 more so we have a gold label at the end of training examples
-        for i in range(0, len(training_examples_tensor) - TRAINING_DAY_LENGTH - 1):
-        
+        for i in range(0, len(training_examples_tensor) - TRAINING_DAY_LENGTH - 1, TRAINING_DAY_LENGTH):
+            if len(skipped_training) > 0 and i in skipped_training:
+                skipped_populated = True
+                continue
+
+            up = 0
+            down = 0
+
             example_tensor = training_examples_tensor[i:i+TRAINING_DAY_LENGTH]
 
             # This is the reason we need to subtract by 1
@@ -86,14 +102,22 @@ def train_stock_model():
             for gold_example in training_examples_tensor[i + 1:i+len(example_tensor) + 1]:
                 if gold_example[0] >= 0:
                     gold_examples.append(1)
+                    up += 1
                 else:
                     gold_examples.append(0)
+                    down+=1
+
+            # Used to balance the classes
+            if total_down < 148 and up >= down + 4 and i != 0 and not skipped_populated:
+                total_down += up - down
+                skipped_training.append(i)
+                continue
 
             gold_example_tensor = torch.tensor(gold_examples)
             
             log_probs = model.forward(example_tensor)
 
-            if i % (TRAINING_DAY_LENGTH * 4)  == 0:
+            if i == 0:
                 print("gold", gold_example_tensor.tolist())
                 print("pred", torch.argmax(log_probs, dim=1).tolist())
                 print()
@@ -104,8 +128,12 @@ def train_stock_model():
             loss.backward()
             optimizer.step()
 
+            # scheduler.step()
+
             total_loss += loss
-        print(f'epoch:{e} total_loss:{total_loss} time:{time.time() - start_time:.2f}\n')
+        # new_lr = optimizer.param_groups[0]['lr']
+        new_lr = lr
+        print(f'epoch:{e} total_loss:{total_loss} lr:{new_lr} time:{time.time() - start_time:.2f}\n')
 
     print(f"\ne:{epoch} lr:{lr} nhead:{nhead} n_layers:{n_layers} total_time:{time.time() - start_time:.2f}")
 
@@ -117,6 +145,8 @@ def train_stock_model():
     correct = 0
     total = 0
     for i in range(0, len(training_examples_tensor), TRAINING_DAY_LENGTH):
+        if i in skipped_training:
+            continue
         example_tensor = training_examples_tensor[i:i+TRAINING_DAY_LENGTH]
 
         gold_examples = []

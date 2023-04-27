@@ -105,17 +105,17 @@ def create_training_data(articles, real_price_data):
 
 if __name__== "__main__":
 
-    TICKER = "AMD" # PUT TICKER HERE
+    TICKER = "NVDA" # PUT TICKER HERE
 
     # TODO: Change this to be dynamic and configurable
-    with open(f'./Dataset/{TICKER}-article-collector', 'rb') as f:
-        finviz = pickle.load(f).articles
+    # with open(f'./Dataset/{TICKER}-article-collector', 'rb') as f:
+    #     finviz = pickle.load(f).articles
         
     with open(f'./Dataset/{TICKER}-motley-article-collector', 'rb') as f:
         motley = pickle.load(f).articles
 
-    combined_articles = finviz.copy()
-    combined_articles.extend(motley)
+    combined_articles = motley.copy()
+    # combined_articles.extend(finviz)
 
     earliest_article_date = combined_articles[0].date.date()
 

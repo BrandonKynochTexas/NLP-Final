@@ -26,7 +26,8 @@ from urllib.error import HTTPError
 import requests
 from bs4 import BeautifulSoup # For extracting contents of html pages
 from datetime import datetime
-from readability import Document
+# from readability import Document
+import readability
 
 from selenium import webdriver
 from selenium.webdriver.support.wait import WebDriverWait 
@@ -471,7 +472,7 @@ def date_from_str_simple(date):
 
 if __name__=="__main__":
     # nvda_data = StockData(ticker='NVDA', interval=tvDFI.in_1_hour, num_days=365)
-    amd_data = StockData(ticker='AMD', interval=tvDFI.in_1_hour, num_days=365)
+    amd_data = StockData(ticker='AMD', interval=tvDFI.in_daily, num_days=365)
     # qcom_data = StockData(ticker='QCOM', interval=tvDFI.in_1_hour, num_days=12)
     # txn_data = StockData(ticker='TXN', interval=tvDFI.in_1_hour, num_days=12)
     # avgo_data = StockData(ticker='AVGO', interval=tvDFI.in_1_hour, num_days=12)

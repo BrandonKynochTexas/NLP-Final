@@ -43,7 +43,6 @@ def calc_article_score(text, model_pipeline):
     return model_pipeline(clean_text(text))
 
 def create_training_data(articles, real_price_data):
-
     # Model pipeline for score inference
     model_pipeline = create_finbert_pipeline()
 
@@ -51,7 +50,7 @@ def create_training_data(articles, real_price_data):
     training_examples = []
 
     for idx, price_data in enumerate(real_price_data):
-        price = price_data[0][1] # price_data[i][1] is close price
+        price = price_data[0][1] # real_price_data[i][0][1] is close price
         current_date = timestamp_to_dateime(price_data[0][0]).date()
 
         if idx == 0:

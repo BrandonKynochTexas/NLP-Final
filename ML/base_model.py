@@ -4,18 +4,64 @@ import torch
 import torch.nn as nn
 import pickle
 import time
+import math
+
+from torch.utils.data import Dataset, DataLoader, random_split
+
+# Tensorboard
+from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
+writer = SummaryWriter(log_dir=f'runs/{datetime.now().strftime("%H-%M-%S")}')
+
+
+
+class StockDataset(Dataset):
+    def __init__(self, training_examples, days_attention, days_stride) -> None:
+        self.days_attention = days_attention # Length of each sample - i.e. maximum number of days model can attend to
+        self.days_stride = days_stride
+        self.n_samples = math.floor((len(training_examples) - days_attention) / days_stride)
+
+        # Input feature size if [n_days, 4]
+        #   input_feature[i] = [close_price, sentiment_positive, sentiment_neutral, sentiment_negative]
+        self.x = torch.from_numpy(np.zeros((self.n_samples, self.days_attention, 4), dtype=np.float64))
+        self.y = torch.from_numpy(np.zeros((self.n_samples, self.days_attention), dtype=np.float64))
+
+        training_examples.append(training_examples[len(training_examples) -1]) # Duplicate last entry so that we don't have index out of bounds when computing gold label
+        for i in range(self.n_samples):
+            idx = i * days_stride
+            for j in range(days_attention):
+                self.x[i, j, 0] = training_examples[idx + j].price
+                self.x[i, j, 1] = training_examples[idx + j].sentiment_scores[0]
+                self.x[i, j, 2] = training_examples[idx + j].sentiment_scores[1]
+                self.x[i, j, 3] = training_examples[idx + j].sentiment_scores[2]
+                # self.x[idx, j, [1, 2, 3]] = training_examples[idx + j].sentiment_scores
+
+                if training_examples[idx + j + 1].price >= 0:
+                    self.y[i, j] = 1  # Stock increases at next timestep
+                else:
+                    self.y[i, j] = 0  # Stock decreases at next timestep
+                
+    def __getitem__(self, index):   # return shape: x -> [num_days, 4]      y -> [num_days]
+        return self.x[index], self.y[index]
+
+    def __len__(self):
+        return self.n_samples
+
+
 
 
 class TransformerLanguageModel(nn.Module):
-    def __init__(self, d_model=4, nhead=8, n_layers=3):
+    def __init__(self, device, d_model=4, nhead=8, n_layers=3):
         super().__init__()
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
+        self.device = device
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead).to(dtype=torch.float64)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
 
         # 2 output dim, 1 is goes up, 0 it goes down
-        self.W = nn.Linear(d_model, 2)
-        self.log_softmax=nn.LogSoftmax(dim=1)
+        self.W = nn.Linear(d_model, 2).to(dtype=torch.float64)
+        self.log_softmax=nn.LogSoftmax(dim=1).to(dtype=torch.float64)
 
         nn.init.xavier_uniform_(self.W.weight)
 
@@ -25,6 +71,7 @@ class TransformerLanguageModel(nn.Module):
         
         mask = (torch.triu(torch.ones(seq_len, seq_len)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        mask = mask.to(dtype=torch.float64).to(self.device)
 
         outputs = self.transformer_encoder(src=training_examples, mask=mask)
 
@@ -32,19 +79,48 @@ class TransformerLanguageModel(nn.Module):
         outputs = self.log_softmax(outputs)
         
         return outputs
+
+
+def evaluate_model(model, dataset, device):
+    eval_correct = 0
+    eval_total = 0
+
+    log_interval = 1 if len(dataset) < 10 else 5
+    for i, (data, actual) in enumerate(dataset):
+        data = data.to(device)
+        actual = actual.to(device)
     
+        # forward pass and loss
+        log_probs = model.forward(data)
+
+        predicted_label = torch.argmax(log_probs, dim=1)
+        for label, gold_label in zip(predicted_label, actual):
+            eval_total += 1
+            if label == gold_label:
+                eval_correct += 1
+
+        model.zero_grad()
+        
+        if i % log_interval == 0:
+            print(f'\n[{i}] pred:\t {predicted_label.cpu().numpy()}')
+            print(f'[{i}] gold:\t {actual.to(dtype=torch.int64).cpu().numpy()}')
+
+    print(f"\nEvaluation Accuracy: {eval_correct}/{eval_total} = {eval_correct / eval_total}\n")
 
 
 def train_stock_model():
+    # device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
-    device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+    print(f'Loading model')
 
     d_model = 4
     nhead = 2
     n_layers = 2
     lr = 1e-4
 
-    model = TransformerLanguageModel(d_model=d_model, nhead=nhead, n_layers=n_layers)
+    model = TransformerLanguageModel(device=device, d_model=d_model, nhead=nhead, n_layers=n_layers)
     model.zero_grad()
     model.train()
     model.to(device)
@@ -52,122 +128,88 @@ def train_stock_model():
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fcn = nn.NLLLoss()
 
-    epoch = 2000
 
-    start_time = time.time()
-    print(f"\ne:{epoch} lr:{lr} d_model:{d_model} nhead:{nhead} n_layers:{n_layers}")
+    # print(f"\nTotal epochs:{epochs} lr:{lr} d_model:{d_model} nhead:{nhead} n_layers:{n_layers}")
 
+    print(f'Loading data')
 
     with open('training_examples/AMD_training_example.pkl', 'rb') as f:
-        training_examples = pickle.load(f)
+        training_examples = pickle.load(f) # A list of TrainingExample
 
-    training_examples_values = []
-    for example in training_examples:
-        values = [example.price]
-        values.extend(example.sentiment_scores)
-        training_examples_values.append(values)
-        
     TRAINING_DAY_LENGTH = 10
+    stock_dataset = StockDataset(
+        training_examples,
+        days_attention=TRAINING_DAY_LENGTH,
+        days_stride=3 # Determines how much day windows will overlap
+        # if days_stride == days_attention -> there is no overlap
+    )
+
+    train_length = math.floor(len(stock_dataset) * 0.9)
+    stocks_train, stocks_test = random_split(stock_dataset, [train_length, len(stock_dataset) - train_length])
+
+    train_data_loader = DataLoader(
+        dataset=stocks_train,
+        # batch_size= 20 * max(1, torch.cuda.device_count()),
+        batch_size=10,
+        shuffle=True)
     
-    validation_length = 10
-    validation = torch.tensor(training_examples_values[-validation_length:])
-    training_examples_tensor = torch.tensor(training_examples_values[:-validation_length])
-    
-    
-    for e in range(epoch):
-        total_loss = 0
-        # Need to subtract by 1 more so we have a gold label at the end of training examples
-        for i in range(0, len(training_examples_tensor) - TRAINING_DAY_LENGTH - 1):
+
+    print(f'Beginning training')
+
+    num_epochs = 400
+    n_total_steps = len(train_data_loader)
+    log_interval = 1
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        for i, (data, actual) in enumerate(iter(train_data_loader)):
+            data = data.to(device)
+            actual = actual.to(device)
         
-            example_tensor = training_examples_tensor[i:i+TRAINING_DAY_LENGTH]
+            # forward pass and loss
+            log_probs = model.forward(data)
 
-            # This is the reason we need to subtract by 1
-            gold_examples = []
-            for gold_example in training_examples_tensor[i + 1:i+len(example_tensor) + 1]:
-                if gold_example[0] >= 0:
-                    gold_examples.append(1)
-                else:
-                    gold_examples.append(0)
+            # actual and predicted have to be flattened for NLLLoss because it doesn't support batching
+            # NLLLoss isn't implemented for torch.float64 so we convert to torch.LongTensor
+            loss = loss_fcn(log_probs.view(-1, log_probs.shape[2]), actual.view(-1).type(torch.LongTensor).to(device))
 
-            gold_example_tensor = torch.tensor(gold_examples)
-            
-            log_probs = model.forward(example_tensor)
-
-            if i % (TRAINING_DAY_LENGTH * 4)  == 0:
-                print("gold", gold_example_tensor.tolist())
-                print("pred", torch.argmax(log_probs, dim=1).tolist())
-                print()
-
-            loss = loss_fcn(log_probs, gold_example_tensor)
-
-            model.zero_grad()
+            # backward pass
             loss.backward()
+
+            # update
             optimizer.step()
+            # scheduler.step()
+            
+            optimizer.zero_grad()
+            model.zero_grad()
 
-            total_loss += loss
-        print(f'epoch:{e} total_loss:{total_loss} time:{time.time() - start_time:.2f}\n')
-
-    print(f"\ne:{epoch} lr:{lr} nhead:{nhead} n_layers:{n_layers} total_time:{time.time() - start_time:.2f}")
-
+            running_loss += loss.item()
+    
+            if (i + 1) % log_interval == 0:
+                print(f'actual: \t{actual[0].cpu().numpy()}')
+                print(f'predicted: \t{[torch.argmax(log_probs[0, i]).item() for i in range(log_probs.shape[1])]}')
+                print(f'epoch {epoch + 1} / {num_epochs}, step {i + 1}/{n_total_steps}, loss = {loss.item():.4f}')
+                # writer.add_scalar('training loss', running_loss / log_interval, (epoch * n_total_steps) + i)
+                # writer.add_scalar('training accuracy', running_correct / (actual.shape[1] * log_interval), (epoch * n_total_steps) + i)
+                running_loss = 0.0
+                # running_correct = 0
 
     # Evaluate the Model
     model.eval()
-    print("Evaluating model on training data\n")
+    
+    print("\nEvaluating model on training data\n")
+    evaluate_model(
+        model=model,
+        dataset=stocks_train,
+        device=device
+    )
 
-    correct = 0
-    total = 0
-    for i in range(0, len(training_examples_tensor), TRAINING_DAY_LENGTH):
-        example_tensor = training_examples_tensor[i:i+TRAINING_DAY_LENGTH]
-
-        gold_examples = []
-        for gold_example in training_examples_tensor[i+1:i+TRAINING_DAY_LENGTH+1]:
-            if gold_example[0] >= 0:
-                gold_examples.append(1)
-            else:
-                gold_examples.append(0)
-
-        log_probs = model.forward(example_tensor)
-        predicted_label = torch.argmax(log_probs, dim=1)
-
-        for label, gold_label in zip(predicted_label, gold_examples):
-            total += 1
-            if label == gold_label:
-                correct += 1
-        if i == 0:
-            print("gold", gold_examples)
-            print("pred", predicted_label.tolist())
-            print()
-
-    print(f"Training Accuracy: {correct}/{total} = {correct / total}\n")
-
-
-    print("Evaluating model on validation data\n")
-
-    correct = 0
-    total = 0
-    for i in range(0, len(validation), TRAINING_DAY_LENGTH):
-        example_tensor = validation[i:i+TRAINING_DAY_LENGTH]
-
-        gold_examples = []
-        for gold_example in validation[i+1:i+TRAINING_DAY_LENGTH+1]:
-            if gold_example[0] >= 0:
-                gold_examples.append(1)
-            else:
-                gold_examples.append(0)
-
-        log_probs = model.forward(example_tensor)
-        predicted_label = torch.argmax(log_probs, dim=1)
-
-        for label, gold_label in zip(predicted_label, gold_examples):
-            total += 1
-            if label == gold_label:
-                correct += 1
-
-        print("gold", gold_examples)
-        print("pred", predicted_label.tolist())
-        print()
-
-    print(f"Validation Accuracy: {correct}/{total} = {correct / total} ")
+    print("\nEvaluating model on test data\n")
+    evaluate_model(
+        model=model,
+        dataset=stocks_test,
+        device=device
+    )
+    
 
 
 if __name__== "__main__":
